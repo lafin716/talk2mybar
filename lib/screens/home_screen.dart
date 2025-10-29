@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/meeting.dart';
 import '../services/database_service.dart';
-import 'recording_screen.dart';
+import 'recording_screen_whisper.dart';
 import 'meeting_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -45,7 +45,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => const RecordingScreen(),
+        builder: (context) => const RecordingScreenWhisper(),
       ),
     );
 
