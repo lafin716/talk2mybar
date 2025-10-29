@@ -1,19 +1,20 @@
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:whisper_flutter/whisper_flutter.dart';
+import 'package:whisper_ggml/whisper_ggml.dart';
 
 /// Whisper.cpp 기반 온디바이스 AI 음성 인식 서비스
 class WhisperService {
-  Whisper? _whisper;
+  final WhisperController _whisperController = WhisperController();
   bool _isInitialized = false;
-  String? _modelPath;
+  WhisperModel _currentModel = WhisperModel.base;
 
   bool get isInitialized => _isInitialized;
+  WhisperModel get currentModel => _currentModel;
 
   /// Whisper 초기화
-  /// modelPath: 모델 파일 경로 (예: ggml-base.bin)
-  Future<bool> initialize({String? modelPath}) async {
+  /// model: 사용할 Whisper 모델 (기본: base)
+  Future<bool> initialize({WhisperModel? model}) async {
     if (_isInitialized) return true;
 
     try {
@@ -24,31 +25,17 @@ class WhisperService {
         return false;
       }
 
-      // 모델 경로 설정
-      if (modelPath != null) {
-        _modelPath = modelPath;
-      } else {
-        // 기본 모델 경로 (assets 또는 다운로드된 위치)
-        final appDir = await getApplicationDocumentsDirectory();
-        _modelPath = '${appDir.path}/models/ggml-base.bin';
+      // 모델 설정
+      if (model != null) {
+        _currentModel = model;
       }
 
-      // 모델 파일 존재 확인
-      if (!await File(_modelPath!).exists()) {
-        print('모델 파일을 찾을 수 없습니다: $_modelPath');
-        return false;
-      }
-
-      // Whisper 초기화
-      _whisper = Whisper(
-        model: _modelPath!,
-        language: 'ko', // 한국어
-        threads: 4, // CPU 코어 수에 맞게 조정
-        translate: false, // 번역 안 함
-      );
+      // 모델 다운로드 (자동)
+      print('모델 다운로드 시작: ${_currentModel.name}');
+      await _whisperController.downloadModel(_currentModel);
+      print('모델 다운로드 완료');
 
       _isInitialized = true;
-      print('Whisper 초기화 성공: $_modelPath');
       return true;
     } catch (e) {
       print('Whisper 초기화 실패: $e');
@@ -57,10 +44,13 @@ class WhisperService {
   }
 
   /// 오디오 파일을 텍스트로 변환
-  /// audioPath: 녹음된 오디오 파일 경로 (WAV 또는 M4A)
-  /// Returns: 변환된 텍스트와 세그먼트 정보
-  Future<WhisperTranscription?> transcribeFile(String audioPath) async {
-    if (!_isInitialized || _whisper == null) {
+  /// audioPath: 녹음된 오디오 파일 경로 (WAV 권장)
+  /// language: 언어 코드 ('ko', 'en', 'auto' 등)
+  Future<WhisperTranscription?> transcribeFile(
+    String audioPath, {
+    String language = 'ko',
+  }) async {
+    if (!_isInitialized) {
       throw Exception('Whisper가 초기화되지 않았습니다.');
     }
 
@@ -69,61 +59,116 @@ class WhisperService {
     }
 
     try {
-      print('음성 인식 시작: $audioPath');
-      final result = await _whisper!.transcribe(audioPath);
-      print('음성 인식 완료');
-      return result;
+      print('음성 인식 시작: $audioPath (모델: ${_currentModel.name}, 언어: $language)');
+
+      final result = await _whisperController.transcribe(
+        model: _currentModel,
+        audioPath: audioPath,
+        lang: language,
+      );
+
+      if (result?.transcription.text != null) {
+        print('음성 인식 완료: ${result!.transcription.text}');
+
+        // 세그먼트 정보 파싱
+        final segments = <WhisperSegment>[];
+        if (result.transcription.segments != null) {
+          for (final segment in result.transcription.segments!) {
+            segments.add(WhisperSegment(
+              text: segment.text,
+              startTime: (segment.from * 1000).toInt(),
+              endTime: (segment.to * 1000).toInt(),
+            ));
+          }
+        }
+
+        return WhisperTranscription(
+          text: result.transcription.text!,
+          segments: segments,
+          language: language,
+        );
+      }
+
+      print('음성 인식 결과가 없습니다.');
+      return null;
     } catch (e) {
       print('음성 인식 실패: $e');
       return null;
     }
   }
 
-  /// 스트림 방식으로 음성 인식 (실시간)
-  /// 참고: Whisper는 기본적으로 파일 기반이므로 실시간은 제한적
-  Stream<String> transcribeStream(String audioPath) async* {
-    final result = await transcribeFile(audioPath);
-    if (result != null) {
-      yield result.text;
+  /// 모델 변경
+  Future<bool> changeModel(WhisperModel newModel) async {
+    try {
+      print('모델 변경: ${_currentModel.name} → ${newModel.name}');
+
+      // 새 모델 다운로드
+      await _whisperController.downloadModel(newModel);
+
+      _currentModel = newModel;
+      print('모델 변경 완료');
+      return true;
+    } catch (e) {
+      print('모델 변경 실패: $e');
+      return false;
     }
   }
 
   /// 사용 가능한 모델 목록
-  List<WhisperModel> getAvailableModels() {
+  List<WhisperModelInfo> getAvailableModels() {
     return [
-      WhisperModel(
+      WhisperModelInfo(
+        model: WhisperModel.tiny,
         name: 'Tiny',
-        fileName: 'ggml-tiny.bin',
         size: '75 MB',
         description: '가장 빠르지만 정확도가 낮음',
+        recommended: '저사양 기기, 빠른 응답 필요시',
       ),
-      WhisperModel(
+      WhisperModelInfo(
+        model: WhisperModel.base,
         name: 'Base',
-        fileName: 'ggml-base.bin',
         size: '142 MB',
-        description: '균형잡힌 속도와 정확도',
+        description: '균형잡힌 속도와 정확도 (권장)',
+        recommended: '대부분의 사용 환경',
       ),
-      WhisperModel(
+      WhisperModelInfo(
+        model: WhisperModel.small,
         name: 'Small',
-        fileName: 'ggml-small.bin',
         size: '466 MB',
-        description: '높은 정확도, 느린 속도',
+        description: '높은 정확도, 느린 처리 속도',
+        recommended: '정확도가 중요한 경우',
       ),
-      WhisperModel(
+      WhisperModelInfo(
+        model: WhisperModel.medium,
         name: 'Medium',
-        fileName: 'ggml-medium.bin',
         size: '1.5 GB',
-        description: '매우 높은 정확도, 매우 느림',
+        description: '최고 정확도, 매우 느린 처리 속도',
+        recommended: '고사양 기기, 최고 품질 필요시',
       ),
     ];
   }
 
-  /// 현재 사용 중인 모델 경로
-  String? get currentModelPath => _modelPath;
+  /// 모델이 다운로드되어 있는지 확인
+  Future<bool> isModelDownloaded(WhisperModel model) async {
+    try {
+      final path = await _whisperController.getPath(model);
+      return await File(path).exists();
+    } catch (e) {
+      print('모델 확인 실패: $e');
+      return false;
+    }
+  }
+
+  /// 현재 사용 중인 모델 정보
+  WhisperModelInfo getCurrentModelInfo() {
+    return getAvailableModels().firstWhere(
+      (info) => info.model == _currentModel,
+      orElse: () => getAvailableModels()[1], // 기본값: Base
+    );
+  }
 
   /// 리소스 정리
   void dispose() {
-    _whisper = null;
     _isInitialized = false;
   }
 }
@@ -159,16 +204,18 @@ class WhisperSegment {
 }
 
 /// Whisper 모델 정보
-class WhisperModel {
+class WhisperModelInfo {
+  final WhisperModel model;
   final String name;
-  final String fileName;
   final String size;
   final String description;
+  final String recommended;
 
-  WhisperModel({
+  WhisperModelInfo({
+    required this.model,
     required this.name,
-    required this.fileName,
     required this.size,
     required this.description,
+    required this.recommended,
   });
 }
