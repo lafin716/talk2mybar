@@ -1,6 +1,7 @@
 import '../models/meeting.dart';
 import '../models/transcript_segment.dart';
 import 'package:intl/intl.dart';
+import 'dart:convert';
 
 /// 대본 정리 및 포맷팅 유틸리티
 class TranscriptFormatter {

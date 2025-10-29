@@ -222,7 +222,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
             },
           ),
           ListTile(
-            leading: const Icon(Icons.markdown),
+            leading: const Icon(Icons.abc),
             title: const Text('Markdown'),
             onTap: () {
               Navigator.pop(context);
