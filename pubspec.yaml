@@ -17,12 +17,8 @@ dependencies:
   provider: ^6.1.1
 
   # 음성 인식 (온디바이스 AI - Whisper.cpp)
-  whisper_flutter: ^1.0.1
+  whisper_ggml: ^1.7.0
   record: ^5.0.4
-
-  # HTTP 요청 (모델 다운로드)
-  http: ^1.2.0
-  dio: ^5.4.0
 
   # 권한 관리
   permission_handler: ^11.3.0
